@@ -15,7 +15,7 @@ type Summary = {
     customer_count: number;
     messages_sent: number;
     messages_failed: number;
-    template_count: number;
+    scheduled_visits: number;
   };
 };
 
@@ -128,8 +128,8 @@ export default function AdminVendorDetail() {
               <p className="mt-1 text-2xl font-bold tabular-nums text-slate-900">{v.messages_failed}</p>
             </div>
             <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Templates</p>
-              <p className="mt-1 text-2xl font-bold tabular-nums text-slate-900">{v.template_count}</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Scheduled visits</p>
+              <p className="mt-1 text-2xl font-bold tabular-nums text-slate-900">{v.scheduled_visits}</p>
             </div>
           </div>
 

@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:migrate-patches": "tsx src/db/applyPatches.ts",
     "db:migrate-templates": "tsx src/db/applyTemplateSubmissionsMigration.ts",
     "db:migrate-dashboard-reminders": "tsx src/db/applyVendorDashboardRemindersMigration.ts",
     "db:migrate-content-types": "tsx src/db/applyTemplateContentTypesMigration.ts",
@@ -28,7 +29,6 @@
     "multer": "^1.4.5-lts.1",
     "node-cron": "^3.0.3",
     "pg": "^8.13.1",
-    "twilio": "^5.4.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

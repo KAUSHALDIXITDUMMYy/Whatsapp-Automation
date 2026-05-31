@@ -1,13 +1,8 @@
 import { query } from "../db/pool.js";
-import { enqueueOutboundMessage, resolveTemplateBody } from "./messageJobs.js";
+import { config } from "../config.js";
+import { enqueueOutboundMessage } from "./messageJobs.js";
+import { shouldSkipRechargeReminder, parseISODate } from "./billingCycle.js";
 import { getVendorSubscription, isSubscriptionActive } from "./subscription.js";
-
-function parseISODate(v: unknown): string | null {
-  if (v == null) return null;
-  const s = String(v).trim();
-  if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return null;
-  return s.slice(0, 10);
-}
 
 function addDays(iso: string, days: number): string {
   const d = new Date(iso + "T12:00:00.000Z");
@@ -17,6 +12,7 @@ function addDays(iso: string, days: number): string {
 
 export async function runDailyReminderScan(): Promise<{ scanned: number; queued: number }> {
   const today = new Date().toISOString().slice(0, 10);
+  const templateName = config.metaTemplateRecharge;
 
   const rules = await query<{
     id: string;
@@ -24,33 +20,43 @@ export async function runDailyReminderScan(): Promise<{ scanned: number; queued:
     date_field_key: string;
     trigger_type: string;
     days_before: number | null;
-    template_id: string | null;
   }>(
-    `SELECT id, vendor_id, date_field_key, trigger_type, days_before, template_id
+    `SELECT id, vendor_id, date_field_key, trigger_type, days_before
      FROM reminder_rules WHERE is_active = true`
   );
 
   let queued = 0;
 
   for (const rule of rules.rows) {
-    if (!rule.template_id) continue;
-
     const vendorSub = await getVendorSubscription(rule.vendor_id);
     if (!vendorSub || !isSubscriptionActive(vendorSub)) continue;
 
     const customers = await query<{
       id: string;
       phone: string;
+      recharge_date: string | null;
+      rent_paid_until: string | null;
       custom_fields: Record<string, unknown>;
     }>(
-      `SELECT id, phone, custom_fields FROM customers WHERE vendor_id = $1`,
+      `SELECT id, phone, recharge_date, rent_paid_until, custom_fields FROM customers WHERE vendor_id = $1`,
       [rule.vendor_id]
     );
 
     for (const c of customers.rows) {
-      const raw = c.custom_fields[rule.date_field_key];
-      const eventDate = parseISODate(raw);
+      const eventDate =
+        parseISODate(c.recharge_date) ??
+        parseISODate(c.custom_fields[rule.date_field_key]) ??
+        null;
       if (!eventDate) continue;
+
+      if (
+        shouldSkipRechargeReminder({
+          eventDate,
+          rentPaidUntil: parseISODate(c.rent_paid_until),
+        })
+      ) {
+        continue;
+      }
 
       let fireToday = false;
       if (rule.trigger_type === "on_date") {
@@ -62,13 +68,6 @@ export async function runDailyReminderScan(): Promise<{ scanned: number; queued:
 
       if (!fireToday) continue;
 
-      let body: string;
-      try {
-        body = await resolveTemplateBody(rule.vendor_id, rule.template_id, undefined);
-      } catch {
-        continue;
-      }
-
       const disp = await query<{ id: string }>(
         `INSERT INTO reminder_dispatch_log (rule_id, customer_id, dispatch_date)
          VALUES ($1, $2, $3)
@@ -79,10 +78,10 @@ export async function runDailyReminderScan(): Promise<{ scanned: number; queued:
       if (disp.rows.length === 0) continue;
 
       const log = await query<{ id: string }>(
-        `INSERT INTO messages_log (vendor_id, customer_id, phone, body, template_id, status)
-         VALUES ($1, $2, $3, $4, $5, 'queued')
+        `INSERT INTO messages_log (vendor_id, customer_id, phone, body, status, platform_template_name)
+         VALUES ($1, $2, $3, $4, 'queued', $5)
          RETURNING id`,
-        [rule.vendor_id, c.id, c.phone, body, rule.template_id]
+        [rule.vendor_id, c.id, c.phone, `[template:${templateName}]`, templateName]
       );
       await enqueueOutboundMessage(log.rows[0].id);
       queued++;
@@ -91,4 +90,3 @@ export async function runDailyReminderScan(): Promise<{ scanned: number; queued:
 
   return { scanned: rules.rows.length, queued };
 }
-

@@ -13,6 +13,8 @@ import messagingRoutes from "./routes/messaging.js";
 import remindersRoutes from "./routes/reminders.js";
 import adminRoutes from "./routes/admin.js";
 import profileRoutes from "./routes/profile.js";
+import appointmentsRoutes from "./routes/appointments.js";
+import callRequestsRoutes from "./routes/callRequests.js";
 import metaWhatsappWebhookRoutes from "./routes/metaWhatsappWebhook.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { requireAdmin } from "./middleware/auth.js";
@@ -39,6 +41,8 @@ app.use("/api/groups", groupsRoutes);
 app.use("/api/import", importRoutes);
 app.use("/api/messaging", messagingRoutes);
 app.use("/api/reminders", remindersRoutes);
+app.use("/api/appointments", appointmentsRoutes);
+app.use("/api/call-requests", callRequestsRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/webhooks/meta/whatsapp", metaWhatsappWebhookRoutes);
 

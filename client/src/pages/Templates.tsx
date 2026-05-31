@@ -5,6 +5,7 @@ import TemplateContentForm from "../components/TemplateContentForm";
 import {
   CONTENT_TYPE_OPTIONS,
   defaultTypesPayload,
+  normalizeContentTypeKey,
   type TemplateContentValue,
 } from "../constants/templateContent";
 
@@ -21,7 +22,7 @@ type Submission = {
   id: string;
   name: string;
   body: string;
-  twilio_types_key?: string | null;
+  template_types_key?: string | null;
   types_payload?: Record<string, unknown> | null;
   external_template_id: string | null;
   admin_status: string;
@@ -34,9 +35,9 @@ type Submission = {
 };
 
 function formatLabel(key: string | null | undefined): string {
-  if (!key) return "Text";
-  const o = CONTENT_TYPE_OPTIONS.find((x) => x.value === key);
-  return o?.label ?? key;
+  const k = normalizeContentTypeKey(key);
+  const o = CONTENT_TYPE_OPTIONS.find((x) => x.value === k);
+  return o?.label ?? k;
 }
 
 export default function Templates() {
@@ -45,8 +46,8 @@ export default function Templates() {
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [name, setName] = useState("");
   const [content, setContent] = useState<TemplateContentValue>({
-    twilio_types_key: "twilio/text",
-    types_payload: defaultTypesPayload("twilio/text"),
+    template_types_key: "text",
+    types_payload: defaultTypesPayload("text"),
   });
   const [resubmitOf, setResubmitOf] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -64,6 +65,12 @@ export default function Templates() {
     setSubmissions(s.submissions);
   }
 
+  const approvedSubmissions = submissions.filter((s) => {
+    const wa = (s.whatsapp_approval_status ?? "").toLowerCase() === "approved";
+    const admin = s.admin_status === "approved";
+    return wa || admin;
+  });
+
   useEffect(() => {
     void load().catch((e) => setErr(e instanceof Error ? e.message : "Failed"));
   }, []);
@@ -78,15 +85,15 @@ export default function Templates() {
         method: "POST",
         body: JSON.stringify({
           name: name.trim(),
-          twilio_types_key: content.twilio_types_key,
+          template_types_key: content.template_types_key,
           types_payload: content.types_payload,
           ...(resubmitOf ? { resubmits_id: resubmitOf } : {}),
         }),
       });
       setName("");
       setContent({
-        twilio_types_key: "twilio/text",
-        types_payload: defaultTypesPayload("twilio/text"),
+        template_types_key: "text",
+        types_payload: defaultTypesPayload("text"),
       });
       setResubmitOf(null);
       setMsg(resubmitOf ? "Resubmission recorded." : "Submission recorded — platform admin may submit it to WhatsApp.");
@@ -99,16 +106,16 @@ export default function Templates() {
   function startResubmit(sub: Submission) {
     setResubmitOf(sub.id);
     setName(sub.name);
-    const key = sub.twilio_types_key || "twilio/text";
+    const key = normalizeContentTypeKey(sub.template_types_key);
     const raw = sub.types_payload;
     if (raw && typeof raw === "object" && !Array.isArray(raw)) {
       setContent({
-        twilio_types_key: key,
+        template_types_key: key,
         types_payload: { ...(raw as Record<string, unknown>) },
       });
     } else {
       setContent({
-        twilio_types_key: "twilio/text",
+        template_types_key: "text",
         types_payload: { body: sub.body },
       });
     }
@@ -133,9 +140,8 @@ export default function Templates() {
     <div>
       <h1 className="text-2xl font-bold text-slate-900">Message templates</h1>
       <p className="text-slate-600 text-sm mt-1">
-        WhatsApp requires administrator approval (and Meta/Twilio registration) before templates can be used for many
-        outbound sends. Choose a content type (Text, Quick Reply, Call to action, List Picker, Catalog) in Twilio/Meta
-        format.{" "}
+        WhatsApp requires administrator approval and Meta template registration before templates can be used for many
+        outbound sends. Text, Quick reply, and Call to action types can be submitted to Meta from the admin panel.{" "}
         <Link to="/campaign" className="text-brand-700 font-medium hover:underline">
           Send messages
         </Link>
@@ -192,8 +198,8 @@ export default function Templates() {
                 setResubmitOf(null);
                 setName("");
                 setContent({
-                  twilio_types_key: "twilio/text",
-                  types_payload: defaultTypesPayload("twilio/text"),
+                  template_types_key: "text",
+                  types_payload: defaultTypesPayload("text"),
                 });
               }}
               className="text-sm text-slate-600 underline"
@@ -225,7 +231,7 @@ export default function Templates() {
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-medium text-slate-900">{s.name}</span>
                     <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-violet-100 text-violet-900">
-                      {formatLabel(s.twilio_types_key)}
+                      {formatLabel(s.template_types_key)}
                     </span>
                     <span className="rounded-full px-2 py-0.5 text-xs font-medium bg-slate-200 text-slate-800">
                       Admin: {s.admin_status ?? "—"}
@@ -270,14 +276,25 @@ export default function Templates() {
       )}
 
       <div className="mt-10">
-        <h2 className="font-semibold text-slate-900">Saved templates (for sending)</h2>
+        <h2 className="font-semibold text-slate-900">Ready to send</h2>
         <p className="text-xs text-slate-600 mt-1">
-          {isPro
-            ? "After Meta/WhatsApp approves the template (or an admin approves manually), it appears here."
-            : "Templates assigned by your administrator appear here."}
+          Approved templates appear here and in{" "}
+          <Link to="/campaign" className="text-brand-700 font-medium hover:underline">
+            Send messages
+          </Link>
+          . {approvedSubmissions.length > saved.length && (
+            <span className="text-amber-800">
+              {" "}
+              Some approvals are syncing — refresh the page or open Send messages.
+            </span>
+          )}
         </p>
         {saved.length === 0 ? (
-          <p className="text-sm text-slate-500 mt-3">No templates yet.</p>
+          <p className="text-sm text-slate-500 mt-3">
+            {approvedSubmissions.length > 0
+              ? "Approved — open Send messages to sync, or refresh this page."
+              : "No approved templates yet."}
+          </p>
         ) : (
           <ul className="mt-3 space-y-3">
             {saved.map((t) => (

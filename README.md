@@ -1,6 +1,6 @@
 # WhatsApp CRM & Reminder System
 
-Multi-tenant SaaS for small businesses: customer CRM with JSONB custom fields, CSV import with saved mappings, tags and dynamic groups, WhatsApp outbound messaging (Twilio), scheduled reminders (daily cron + BullMQ workers), message logs, and an admin overview.
+Multi-tenant SaaS for small businesses: customer CRM with JSONB custom fields, CSV import with saved mappings, tags and dynamic groups, WhatsApp outbound messaging (Meta Cloud API), scheduled reminders (daily cron + BullMQ workers), message logs, and an admin overview.
 
 ## Stack
 
@@ -58,7 +58,7 @@ If you already ran an older schema, `npm run db:migrate` also applies `subscript
 | --- | --- | --- |
 | Message templates | Limited count (`BASIC_MAX_TEMPLATES`, default 5) | Unlimited |
 | Sending | Must use a **saved template** for each send (no ad-hoc free-text body) | Saved template and/or **custom message body** |
-| WhatsApp “from” number | Shared platform sender (`TWILIO_WHATSAPP_FROM`) | Optional **per-vendor** sender (`whatsapp_sender`) — same Twilio account, verified WhatsApp-enabled number |
+| WhatsApp sender | Platform `META_WHATSAPP_PHONE_NUMBER_ID` | Optional **per-vendor** E.164 (`whatsapp_sender`, reserved for future multi-number) |
 | Billing | Not automated here | Assign tier + expiry in **Admin** after payment |
 
 - **Vendor UI:** Dashboard + **Account** (`/settings`) show plan; Pro can save their WhatsApp sender.
@@ -88,18 +88,19 @@ Open `http://localhost:5173` (Vite proxies `/api` to the API in dev).
 
 Set `VITE_API_URL` only if the UI is hosted separately from the API (otherwise leave unset for same-origin proxy).
 
-## WhatsApp / Meta Cloud API (recommended)
+## WhatsApp / Meta Cloud API
 
-1. In Meta Business Portfolio (Business Manager), set up WhatsApp Business Platform (Cloud API) and add a phone number.
-2. Create a permanent access token (System User token recommended) with WhatsApp permissions.
-3. Set in `server/.env`:
+See **[docs/META_WHATSAPP_SETUP.md](docs/META_WHATSAPP_SETUP.md)** for step-by-step credential setup.
 
-   - `META_WHATSAPP_ACCESS_TOKEN`
-   - `META_WHATSAPP_PHONE_NUMBER_ID`
-   - `META_WHATSAPP_WEBHOOK_VERIFY_TOKEN` (any string you choose)
-   - Optional: `META_GRAPH_VERSION` (default `v22.0`)
+Set in `server/.env`:
 
-If these are omitted, outbound jobs still queue and log as **sent** with a `dry-*` provider id (no real WhatsApp delivery).
+- `META_WHATSAPP_ACCESS_TOKEN`
+- `META_WHATSAPP_PHONE_NUMBER_ID`
+- `META_WHATSAPP_BUSINESS_ACCOUNT_ID` (for template submit/sync)
+- `META_WHATSAPP_WEBHOOK_VERIFY_TOKEN` (webhooks only)
+- Optional: `META_GRAPH_VERSION` (default `v22.0`)
+
+If Meta variables are omitted, the app runs in **dry-run** mode: sends log as **sent** with `dry-*` ids; template submit/sync simulates Meta approval (sync twice after submit).
 
 ### Webhook (optional, for inbound + status)
 
@@ -113,7 +114,7 @@ Use the same verify token as `META_WHATSAPP_WEBHOOK_VERIFY_TOKEN`.
 
 - **Tenant isolation:** Every vendor-scoped table includes `vendor_id`. JWT middleware injects `vendorId`; queries always filter by it.
 - **Admin:** Separate JWT signing secret (`ADMIN_JWT_SECRET`); routes under `/api/admin/*`.
-- **Queues:** `messages_log` rows are created with `status = queued`, then a BullMQ worker calls Twilio and updates `sent` / `failed`.
+- **Queues:** `messages_log` rows are created with `status = queued`, then a BullMQ worker calls Meta Cloud API and updates `sent` / `failed`.
 - **Reminders:** `node-cron` runs daily at **00:15 UTC** (`15 0 * * *`) and enqueues due reminders; each `(rule, customer, calendar day)` is deduped in `reminder_dispatch_log`. You can trigger a manual run: `POST /api/admin/run-reminder-scan` (admin JWT).
 
 ## Sample API routes

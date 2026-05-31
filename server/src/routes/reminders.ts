@@ -11,16 +11,13 @@ const ruleBody = z.object({
   date_field_key: z.string().min(1).max(64),
   trigger_type: z.enum(["on_date", "before_days"]),
   days_before: z.number().int().min(0).nullable().optional(),
-  template_id: z.string().uuid().nullable().optional(),
   is_active: z.boolean().optional(),
 });
 
 router.get("/", async (req: AuthedVendorRequest, res) => {
   const r = await query(
-    `SELECT r.id, r.name, r.date_field_key, r.trigger_type, r.days_before, r.template_id, r.is_active, r.created_at,
-            t.name AS template_name
+    `SELECT r.id, r.name, r.date_field_key, r.trigger_type, r.days_before, r.is_active, r.created_at
      FROM reminder_rules r
-     LEFT JOIN message_templates t ON t.id = r.template_id
      WHERE r.vendor_id = $1
      ORDER BY r.name`,
     [req.vendorId]
@@ -39,8 +36,8 @@ router.post("/", async (req: AuthedVendorRequest, res, next) => {
       (body as { days_before?: number | null }).days_before = null;
     }
     const r = await query<{ id: string }>(
-      `INSERT INTO reminder_rules (vendor_id, name, date_field_key, trigger_type, days_before, template_id, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO reminder_rules (vendor_id, name, date_field_key, trigger_type, days_before, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id`,
       [
         req.vendorId,
@@ -48,7 +45,6 @@ router.post("/", async (req: AuthedVendorRequest, res, next) => {
         body.date_field_key,
         body.trigger_type,
         body.trigger_type === "before_days" ? body.days_before ?? 0 : null,
-        body.template_id ?? null,
         body.is_active ?? true,
       ]
     );
@@ -84,10 +80,6 @@ router.patch("/:id", async (req: AuthedVendorRequest, res, next) => {
     if (body.days_before !== undefined) {
       updates.push(`days_before = $${i++}`);
       params.push(body.days_before);
-    }
-    if (body.template_id !== undefined) {
-      updates.push(`template_id = $${i++}`);
-      params.push(body.template_id);
     }
     if (body.is_active !== undefined) {
       updates.push(`is_active = $${i++}`);

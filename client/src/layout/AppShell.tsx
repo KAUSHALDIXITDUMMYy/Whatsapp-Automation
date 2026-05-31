@@ -1,20 +1,22 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { setToken } from "../api/client";
 
 const nav = [
   { to: "/", label: "Dashboard", end: true },
-  { to: "/customers", label: "Customers" },
+  { to: "/customers", label: "Subscribers" },
   { to: "/import", label: "Import CSV" },
   { to: "/fields", label: "Custom fields" },
-  { to: "/groups", label: "Groups" },
-  { to: "/campaign", label: "Send messages" },
-  { to: "/templates", label: "Templates" },
-  { to: "/reminders", label: "Reminders" },
-  { to: "/settings", label: "Account" },
+  { to: "/inbox", label: "Chats" },
+  { to: "/appointments", label: "Visits" },
+  { to: "/call-requests", label: "Call requests" },
+  { to: "/reminders", label: "Recharge reminders" },
+  { to: "/settings", label: "Settings" },
 ];
 
 export default function AppShell() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const isInbox = location.pathname === "/inbox";
 
   function logout() {
     setToken(null);
@@ -22,11 +24,11 @@ export default function AppShell() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row">
-      <aside className="bg-slate-900 text-white md:w-56 shrink-0">
+    <div className="h-dvh flex flex-col md:flex-row overflow-hidden">
+      <aside className="relative z-20 shrink-0 bg-slate-900 text-white md:w-56 md:h-full md:flex md:flex-col">
         <div className="p-4 border-b border-slate-700">
-          <div className="text-lg font-semibold tracking-tight">WhatsApp CRM</div>
-          <p className="text-xs text-slate-400 mt-1">Reminders & messaging</p>
+          <div className="text-lg font-semibold tracking-tight">Cable CRM</div>
+          <p className="text-xs text-slate-400 mt-1">Subscriber WhatsApp automation</p>
         </div>
         <nav className="p-2 flex md:flex-col gap-1 overflow-x-auto md:overflow-visible">
           {nav.map((item) => (
@@ -54,7 +56,13 @@ export default function AppShell() {
           </button>
         </div>
       </aside>
-      <main className="flex-1 p-4 md:p-8 max-w-6xl w-full mx-auto">
+      <main
+        className={
+          isInbox
+            ? "flex-1 flex min-h-0 min-w-0 flex-col overflow-hidden"
+            : "flex-1 min-w-0 overflow-y-auto p-4 md:p-8 max-w-6xl w-full mx-auto"
+        }
+      >
         <Outlet />
       </main>
     </div>

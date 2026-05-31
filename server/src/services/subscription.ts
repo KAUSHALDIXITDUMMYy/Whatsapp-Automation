@@ -48,7 +48,8 @@ export function assertSendAllowedForTier(
 }
 
 /**
- * Twilio `from` WhatsApp address for Pro when `whatsapp_sender` is set; otherwise use platform default.
+ * Reserved for future per-vendor Meta phone number IDs (Pro `whatsapp_sender`).
+ * Outbound sends currently use the platform META_WHATSAPP_PHONE_NUMBER_ID.
  */
 export function resolveOutboundWhatsAppFrom(v: VendorSubscription): string | undefined {
   if (v.subscription_tier !== "pro") return undefined;

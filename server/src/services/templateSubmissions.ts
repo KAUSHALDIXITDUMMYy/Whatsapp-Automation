@@ -5,7 +5,7 @@ import {
   isApprovedStatus,
   isRejectedStatus,
   type WhatsAppApprovalPoll,
-} from "./twilioWhatsAppTemplateSubmit.js";
+} from "./metaWhatsAppTemplate.js";
 
 export type TemplateSubmissionRow = {
   id: string;
@@ -43,11 +43,11 @@ export async function ensureVendorTemplateSlot(
 export async function materializeVendorTemplateIfEligible(submissionId: string): Promise<boolean> {
   const r = await query<
     TemplateSubmissionRow & {
-      twilio_content_sid: string | null;
+      meta_template_id: string | null;
       whatsapp_approval_status: string | null;
     }
   >(
-    `SELECT id, vendor_id, name, body, external_template_id, twilio_content_sid, admin_status,
+    `SELECT id, vendor_id, name, body, external_template_id, meta_template_id, admin_status,
             whatsapp_approval_status, rejection_reason, resubmits_id, created_at, updated_at
      FROM template_submissions WHERE id = $1`,
     [submissionId]
@@ -65,16 +65,21 @@ export async function materializeVendorTemplateIfEligible(submissionId: string):
   );
   if (exists.rows.length > 0) return true;
 
-  const extId = row.external_template_id ?? row.twilio_content_sid ?? null;
+  const extId = row.external_template_id ?? row.meta_template_id ?? null;
+  const subLang = await query<{ whatsapp_template_name: string | null }>(
+    `SELECT whatsapp_template_name FROM template_submissions WHERE id = $1`,
+    [submissionId]
+  );
+  const templateName = subLang.rows[0]?.whatsapp_template_name ?? row.name;
   await query(
-    `INSERT INTO message_templates (vendor_id, name, body, external_template_id, source_submission_id)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [row.vendor_id, row.name, row.body, extId, submissionId]
+    `INSERT INTO message_templates (vendor_id, name, body, external_template_id, whatsapp_template_language, source_submission_id)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [row.vendor_id, templateName, row.body, extId, "en_US", submissionId]
   );
   return true;
 }
 
-/** Persist Twilio poll results — updates WhatsApp fields only (never admin_status). Materializes vendor template when Meta approves. */
+/** Persist Meta template poll — updates WhatsApp fields only (never admin_status). */
 export async function persistWhatsAppApprovalPoll(
   submissionId: string,
   poll: WhatsAppApprovalPoll,
@@ -92,7 +97,7 @@ export async function persistWhatsAppApprovalPoll(
   if (isApprovedStatus(poll.status)) {
     await query(
       `UPDATE template_submissions SET
-        external_template_id = COALESCE(external_template_id, twilio_content_sid),
+        external_template_id = COALESCE(external_template_id, meta_template_id),
         updated_at = NOW()
        WHERE id = $1`,
       [submissionId]
@@ -111,7 +116,7 @@ export async function persistWhatsAppApprovalPoll(
   return { materialized_vendor: false };
 }
 
-/** Copy an approved catalog submission into a vendor's templates. Requires WhatsApp approved OR admin approved. */
+/** Copy an approved catalog submission into a vendor's templates. */
 export async function assignCatalogSubmissionToVendor(
   submissionId: string,
   vendorId: string,
@@ -119,9 +124,9 @@ export async function assignCatalogSubmissionToVendor(
 ): Promise<{ template_id: string }> {
   await ensureVendorTemplateSlot(vendorId, tier);
   const r = await query<
-    TemplateSubmissionRow & { twilio_content_sid: string | null; whatsapp_approval_status: string | null }
+    TemplateSubmissionRow & { meta_template_id: string | null; whatsapp_approval_status: string | null }
   >(
-    `SELECT id, vendor_id, name, body, external_template_id, twilio_content_sid, admin_status,
+    `SELECT id, vendor_id, name, body, external_template_id, meta_template_id, admin_status,
             whatsapp_approval_status, rejection_reason, resubmits_id, created_at, updated_at
      FROM template_submissions WHERE id = $1`,
     [submissionId]
@@ -144,12 +149,64 @@ export async function assignCatalogSubmissionToVendor(
   if (dup.rows.length > 0) {
     throw new Error("This catalog template is already assigned to this vendor");
   }
-  const extId = row.external_template_id ?? row.twilio_content_sid ?? null;
+  const extId = row.external_template_id ?? row.meta_template_id ?? null;
   const ins = await query<{ id: string }>(
-    `INSERT INTO message_templates (vendor_id, name, body, external_template_id, source_submission_id)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO message_templates (vendor_id, name, body, external_template_id, whatsapp_template_language, source_submission_id)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id`,
-    [vendorId, row.name, row.body, extId, submissionId]
+    [vendorId, row.name, row.body, extId, "en_US", submissionId]
   );
   return { template_id: ins.rows[0].id };
+}
+
+/**
+ * Copy every approved submission for this vendor into message_templates (idempotent).
+ * Ensures Send messages / Campaign dropdown shows templates after WhatsApp or admin approval.
+ */
+export async function syncEligibleTemplatesForVendor(vendorId: string): Promise<number> {
+  const pending = await query<{ id: string }>(
+    `SELECT s.id
+     FROM template_submissions s
+     WHERE s.vendor_id = $1
+       AND (
+         s.admin_status = 'approved'
+         OR LOWER(TRIM(COALESCE(s.whatsapp_approval_status, ''))) = 'approved'
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM message_templates m
+         WHERE m.vendor_id = $1 AND m.source_submission_id = s.id
+       )`,
+    [vendorId]
+  );
+  let created = 0;
+  for (const row of pending.rows) {
+    if (await materializeVendorTemplateIfEligible(row.id)) created++;
+  }
+  return created;
+}
+
+/** Assign a template that already exists in Meta (WhatsApp Manager) directly to a vendor. */
+export async function assignMetaTemplateToVendor(
+  vendorId: string,
+  tier: SubscriptionTier,
+  opts: { metaTemplateId: string; name: string; body: string; language?: string | null }
+): Promise<{ template_id: string; already_assigned: boolean }> {
+  await ensureVendorTemplateSlot(vendorId, tier);
+
+  const dup = await query<{ id: string }>(
+    `SELECT id FROM message_templates WHERE vendor_id = $1 AND external_template_id = $2`,
+    [vendorId, opts.metaTemplateId]
+  );
+  if (dup.rows.length > 0) {
+    return { template_id: dup.rows[0].id, already_assigned: true };
+  }
+
+  const lang = (opts.language ?? "en").trim().slice(0, 32) || "en";
+  const ins = await query<{ id: string }>(
+    `INSERT INTO message_templates (vendor_id, name, body, external_template_id, whatsapp_template_language)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id`,
+    [vendorId, opts.name.slice(0, 255), opts.body, opts.metaTemplateId, lang]
+  );
+  return { template_id: ins.rows[0].id, already_assigned: false };
 }

@@ -2,8 +2,6 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiFetch } from "../api/client";
 
-type FieldDef = { field_key: string; label: string; field_type: string };
-
 export default function CustomerForm() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -11,15 +9,11 @@ export default function CustomerForm() {
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [joiningDate, setJoiningDate] = useState("");
+  const [rechargeDate, setRechargeDate] = useState<string | null>(null);
   const [tags, setTags] = useState("");
-  const [custom, setCustom] = useState<Record<string, string>>({});
-  const [fields, setFields] = useState<FieldDef[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(!isNew);
-
-  useEffect(() => {
-    void apiFetch<{ fields: FieldDef[] }>("/api/fields").then((d) => setFields(d.fields));
-  }, []);
 
   useEffect(() => {
     if (isNew) return;
@@ -29,14 +23,16 @@ export default function CustomerForm() {
         const c = await apiFetch<{
           name: string;
           phone: string;
+          joining_date: string | null;
+          recharge_date: string | null;
           tags: string[];
-          custom_fields: Record<string, string>;
         }>(`/api/customers/${id}`);
         if (cancelled) return;
         setName(c.name);
         setPhone(c.phone);
+        setJoiningDate(c.joining_date?.slice(0, 10) ?? "");
+        setRechargeDate(c.recharge_date?.slice(0, 10) ?? null);
         setTags((c.tags ?? []).join(", "));
-        setCustom(c.custom_fields ?? {});
       } catch (e: unknown) {
         setErr(e instanceof Error ? e.message : "Load failed");
       } finally {
@@ -58,12 +54,17 @@ export default function CustomerForm() {
     const body = {
       name,
       phone,
+      joining_date: joiningDate || null,
       tags: tagList,
-      custom_fields: custom,
+      custom_fields: {},
     };
     try {
       if (isNew) {
-        await apiFetch("/api/customers", { method: "POST", body: JSON.stringify(body) });
+        const r = await apiFetch<{ id: string; recharge_date?: string }>("/api/customers", {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        if (r.recharge_date) setRechargeDate(r.recharge_date);
       } else {
         await apiFetch(`/api/customers/${id}`, { method: "PATCH", body: JSON.stringify(body) });
       }
@@ -73,9 +74,22 @@ export default function CustomerForm() {
     }
   }
 
+  async function markRentPaid() {
+    if (!id || isNew) return;
+    setErr(null);
+    try {
+      const r = await apiFetch<{ next_recharge_date: string }>(`/api/customers/${id}/mark-rent-paid`, {
+        method: "POST",
+      });
+      setRechargeDate(r.next_recharge_date);
+    } catch (ex: unknown) {
+      setErr(ex instanceof Error ? ex.message : "Failed");
+    }
+  }
+
   async function remove() {
     if (!id || isNew) return;
-    if (!confirm("Delete this customer?")) return;
+    if (!confirm("Delete this subscriber?")) return;
     try {
       await apiFetch(`/api/customers/${id}`, { method: "DELETE" });
       navigate("/customers");
@@ -84,24 +98,21 @@ export default function CustomerForm() {
     }
   }
 
-  function setCustomField(key: string, value: string) {
-    setCustom((prev) => ({ ...prev, [key]: value }));
-  }
-
   if (loading) return <p className="text-slate-600">Loading…</p>;
 
   return (
     <div>
-      <div className="flex items-center gap-4">
-        <Link to="/customers" className="text-sm text-brand-700 hover:underline">
-          ← Back
-        </Link>
-      </div>
-      <h1 className="text-2xl font-bold text-slate-900 mt-4">{isNew ? "New customer" : "Edit customer"}</h1>
+      <Link to="/customers" className="text-sm text-brand-700 hover:underline">
+        ← Subscribers
+      </Link>
+      <h1 className="text-2xl font-bold text-slate-900 mt-4">
+        {isNew ? "Add subscriber" : "Edit subscriber"}
+      </h1>
+      <p className="text-sm text-slate-600 mt-1">Standard fields only — same format as the import sheet.</p>
 
       <form onSubmit={onSubmit} className="mt-6 max-w-xl space-y-4">
         <div>
-          <label className="block text-sm font-medium text-slate-700">Name</label>
+          <label className="block text-sm font-medium text-slate-700">Subscriber name *</label>
           <input
             required
             value={name}
@@ -110,7 +121,7 @@ export default function CustomerForm() {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-700">Phone (required)</label>
+          <label className="block text-sm font-medium text-slate-700">Mobile number *</label>
           <input
             required
             value={phone}
@@ -119,30 +130,37 @@ export default function CustomerForm() {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-700">Tags (comma-separated)</label>
+          <label className="block text-sm font-medium text-slate-700">Joining date *</label>
+          <input
+            required
+            type="date"
+            value={joiningDate}
+            onChange={(e) => setJoiningDate(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+        </div>
+        {rechargeDate && (
+          <div className="rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 text-sm text-blue-900">
+            Next recharge due: <strong>{rechargeDate}</strong> (from joining date + billing cycle)
+          </div>
+        )}
+        <div>
+          <label className="block text-sm font-medium text-slate-700">Tags (optional)</label>
           <input
             value={tags}
             onChange={(e) => setTags(e.target.value)}
-            placeholder="VIP, prepaid"
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
           />
         </div>
 
-        {fields.length > 0 && (
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
-            <div className="text-sm font-semibold text-slate-800">Custom fields</div>
-            {fields.map((f) => (
-              <div key={f.field_key}>
-                <label className="block text-xs font-medium text-slate-600">{f.label}</label>
-                <input
-                  type={f.field_type === "number" ? "number" : f.field_type === "date" ? "date" : "text"}
-                  value={custom[f.field_key] ?? ""}
-                  onChange={(e) => setCustomField(f.field_key, e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
-                />
-              </div>
-            ))}
-          </div>
+        {!isNew && (
+          <button
+            type="button"
+            onClick={() => void markRentPaid()}
+            className="rounded-lg border border-green-600 text-green-800 px-4 py-2 text-sm font-medium hover:bg-green-50"
+          >
+            Mark this period&apos;s rent received
+          </button>
         )}
 
         {err && <p className="text-sm text-red-600">{err}</p>}

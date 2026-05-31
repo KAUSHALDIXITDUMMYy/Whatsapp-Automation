@@ -4,26 +4,36 @@ import TemplateContentForm from "../../components/TemplateContentForm";
 import {
   CONTENT_TYPE_OPTIONS,
   defaultTypesPayload,
+  normalizeContentTypeKey,
   type TemplateContentValue,
 } from "../../constants/templateContent";
 import { AdminBadge, WaBadge, inputBase, labelBase } from "./shared";
 import type { VendorRow } from "./AdminVendors";
 
 function formatTypeLabel(key: string | null | undefined): string {
-  if (!key) return "Text";
-  const o = CONTENT_TYPE_OPTIONS.find((x) => x.value === key);
-  return o?.label ?? key;
+  const k = normalizeContentTypeKey(key);
+  const o = CONTENT_TYPE_OPTIONS.find((x) => x.value === k);
+  return o?.label ?? k;
 }
+
+type MetaWhatsAppTemplate = {
+  id: string;
+  name: string;
+  status: string;
+  category: string | null;
+  language: string | null;
+  body: string;
+};
 
 type TemplateSubmissionRow = {
   id: string;
   vendor_id: string | null;
   name: string;
   body: string;
-  twilio_types_key?: string | null;
+  template_types_key?: string | null;
   types_payload?: Record<string, unknown> | null;
   external_template_id: string | null;
-  twilio_content_sid?: string | null;
+  meta_template_id?: string | null;
   whatsapp_template_name?: string | null;
   whatsapp_category?: string | null;
   whatsapp_approval_status?: string | null;
@@ -44,14 +54,67 @@ export default function AdminTemplates() {
   const [err, setErr] = useState<string | null>(null);
   const [catalogName, setCatalogName] = useState("");
   const [catalogContent, setCatalogContent] = useState<TemplateContentValue>({
-    twilio_types_key: "twilio/text",
-    types_payload: defaultTypesPayload("twilio/text"),
+    template_types_key: "text",
+    types_payload: defaultTypesPayload("text"),
   });
   const [tplMsg, setTplMsg] = useState<string | null>(null);
   const [extBySubmission, setExtBySubmission] = useState<Record<string, string>>({});
   const [assignCatalogId, setAssignCatalogId] = useState("");
   const [assignVendorId, setAssignVendorId] = useState("");
   const [waCategoryById, setWaCategoryById] = useState<Record<string, "UTILITY" | "MARKETING">>({});
+  const [metaTemplates, setMetaTemplates] = useState<MetaWhatsAppTemplate[]>([]);
+  const [metaConfigured, setMetaConfigured] = useState(true);
+  const [metaLoading, setMetaLoading] = useState(false);
+  const [assignVendorByMetaId, setAssignVendorByMetaId] = useState<Record<string, string>>({});
+
+  async function loadMetaTemplates() {
+    setMetaLoading(true);
+    try {
+      const d = await apiFetch<{ templates: MetaWhatsAppTemplate[]; configured: boolean }>(
+        "/api/admin/whatsapp-templates",
+        { admin: true }
+      );
+      setMetaTemplates(d.templates);
+      setMetaConfigured(d.configured);
+    } catch (ex: unknown) {
+      setErr(ex instanceof Error ? ex.message : "Failed to load Meta templates");
+    } finally {
+      setMetaLoading(false);
+    }
+  }
+
+  async function assignMetaTemplate(t: MetaWhatsAppTemplate) {
+    const vendorId = assignVendorByMetaId[t.id]?.trim();
+    if (!vendorId) {
+      setErr("Select a vendor to assign this Meta template.");
+      return;
+    }
+    setErr(null);
+    setTplMsg(null);
+    try {
+      const r = await apiFetch<{ template_id: string; already_assigned?: boolean }>(
+        "/api/admin/whatsapp-templates/assign",
+        {
+          method: "POST",
+          admin: true,
+          body: JSON.stringify({
+            vendor_id: vendorId,
+            meta_template_id: t.id,
+            name: t.name,
+            body: t.body,
+            language: t.language ?? "en",
+          }),
+        }
+      );
+      setTplMsg(
+        r.already_assigned
+          ? `“${t.name}” (${t.language ?? "en"}) was already assigned — vendor can use it under Send messages.`
+          : `“${t.name}” (${t.language ?? "en"}) assigned — vendor can send it from Send messages.`
+      );
+    } catch (ex: unknown) {
+      setErr(ex instanceof Error ? ex.message : "Assign failed");
+    }
+  }
 
   async function load() {
     const [v, t] = await Promise.all([
@@ -63,7 +126,9 @@ export default function AdminTemplates() {
   }
 
   useEffect(() => {
-    void load().catch((e) => setErr(e instanceof Error ? e.message : "Failed"));
+    void Promise.all([load(), loadMetaTemplates()]).catch((e) =>
+      setErr(e instanceof Error ? e.message : "Failed")
+    );
   }, []);
 
   async function submitCatalogTemplate(e: FormEvent) {
@@ -76,14 +141,14 @@ export default function AdminTemplates() {
         admin: true,
         body: JSON.stringify({
           name: catalogName.trim(),
-          twilio_types_key: catalogContent.twilio_types_key,
+          template_types_key: catalogContent.template_types_key,
           types_payload: catalogContent.types_payload,
         }),
       });
       setCatalogName("");
       setCatalogContent({
-        twilio_types_key: "twilio/text",
-        types_payload: defaultTypesPayload("twilio/text"),
+        template_types_key: "text",
+        types_payload: defaultTypesPayload("text"),
       });
       setTplMsg("Platform catalog template submitted (pending approval).");
       await load();
@@ -143,7 +208,7 @@ export default function AdminTemplates() {
         admin: true,
         body: JSON.stringify({ category: waCategoryFor(id) }),
       });
-      setTplMsg("Submitted to WhatsApp via Twilio — click Sync until Meta approves.");
+      setTplMsg("Submitted to Meta — click Sync status (twice in dry-run mode without credentials).");
       await load();
     } catch (ex: unknown) {
       setErr(ex instanceof Error ? ex.message : "Submit failed");
@@ -202,15 +267,121 @@ export default function AdminTemplates() {
       <header className="border-b border-slate-100 pb-6">
         <p className="text-xs font-semibold uppercase tracking-widest text-violet-700">WhatsApp</p>
         <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">Template approvals</h1>
-        <p className="mt-1 text-sm text-slate-600">Catalog, Twilio submit, Meta sync, vendor assignments</p>
+        <p className="mt-1 text-sm text-slate-600">
+          Import approved templates from Meta WhatsApp Manager, assign to vendors, or manage in-app submissions.
+        </p>
       </header>
+
+      {tplMsg && (
+        <p className="mt-6 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800 ring-1 ring-emerald-200/80">
+          {tplMsg}
+        </p>
+      )}
+      {err && (
+        <p className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800 ring-1 ring-rose-200/80">
+          {err}
+        </p>
+      )}
+
+      <section className="mt-8 rounded-2xl border border-emerald-200/80 bg-gradient-to-b from-emerald-50/50 to-white p-6 shadow-sm md:p-8">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-100 pb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Approved in Meta (WhatsApp Manager)</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Live from your WABA — e.g. reminder, welcome_onboard, hello_world. Assign directly to a vendor for{" "}
+              <strong>Send messages</strong>.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadMetaTemplates()}
+            disabled={metaLoading}
+            className="rounded-xl border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold text-emerald-900 shadow-sm hover:bg-emerald-50 disabled:opacity-50"
+          >
+            {metaLoading ? "Loading…" : "Refresh from Meta"}
+          </button>
+        </div>
+
+        {!metaConfigured && (
+          <p className="mt-4 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-950 ring-1 ring-amber-200">
+            Set <code className="text-xs">META_WHATSAPP_ACCESS_TOKEN</code> and{" "}
+            <code className="text-xs">META_WHATSAPP_BUSINESS_ACCOUNT_ID</code> in server/.env, then refresh.
+          </p>
+        )}
+
+        {metaConfigured && !metaLoading && metaTemplates.length === 0 && (
+          <p className="mt-4 text-sm text-slate-500">No active/approved templates returned from Meta for this WABA.</p>
+        )}
+
+        {metaTemplates.length > 0 && (
+          <div className="mt-6 overflow-x-auto rounded-xl border border-emerald-100">
+            <table className="min-w-full divide-y divide-emerald-100 text-sm">
+              <thead>
+                <tr className="bg-emerald-50/80 text-left text-xs font-semibold uppercase tracking-wider text-emerald-900">
+                  <th className="px-4 py-3">Template name</th>
+                  <th className="px-4 py-3">Category</th>
+                  <th className="px-4 py-3">Language</th>
+                  <th className="min-w-[160px] px-4 py-3">Body preview</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="min-w-[220px] px-4 py-3">Assign to vendor</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-emerald-50 bg-white">
+                {metaTemplates.map((t) => (
+                  <tr key={`${t.id}-${t.language ?? ""}`} className="align-top">
+                    <td className="px-4 py-3 font-medium text-slate-900">{t.name}</td>
+                    <td className="px-4 py-3 text-slate-600">{t.category ?? "—"}</td>
+                    <td className="px-4 py-3 text-slate-600">{t.language ?? "—"}</td>
+                    <td className="max-w-xs px-4 py-3 text-slate-600">
+                      <span className="line-clamp-3" title={t.body}>
+                        {t.body}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-900">
+                        {t.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <select
+                          value={assignVendorByMetaId[t.id] ?? ""}
+                          onChange={(e) =>
+                            setAssignVendorByMetaId((prev) => ({ ...prev, [t.id]: e.target.value }))
+                          }
+                          className={`${inputBase} min-w-[140px] py-2 text-xs`}
+                        >
+                          <option value="">Select vendor…</option>
+                          {vendors.map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.company_name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => void assignMetaTemplate(t)}
+                          className="shrink-0 rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800"
+                        >
+                          Assign
+                        </button>
+                      </div>
+                      <p className="mt-1 font-mono text-[10px] text-slate-400">ID: {t.id}</p>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section className="mt-8 rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm md:p-8">
         <div className="border-b border-slate-100 pb-4">
           <div className="rounded-xl bg-slate-50/80 p-4 text-sm leading-relaxed text-slate-600 ring-1 ring-slate-100">
             <p>
               <span className="font-semibold text-slate-800">WhatsApp:</span> use{" "}
-              <span className="font-medium text-slate-900">Submit to WhatsApp</span> (Twilio), then{" "}
+              <span className="font-medium text-slate-900">Submit to WhatsApp</span> (Meta API), then{" "}
               <span className="font-medium text-slate-900">Sync WhatsApp status</span>. Utility or Marketing only.
             </p>
             <p className="mt-2">
@@ -290,17 +461,6 @@ export default function AdminTemplates() {
           </form>
         </div>
 
-        {tplMsg && (
-          <p className="mt-6 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800 ring-1 ring-emerald-200/80">
-            {tplMsg}
-          </p>
-        )}
-        {err && (
-          <p className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800 ring-1 ring-rose-200/80">
-            {err}
-          </p>
-        )}
-
         <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200/80 shadow-inner">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-100 text-sm">
@@ -329,7 +489,7 @@ export default function AdminTemplates() {
                         </span>
                       </td>
                       <td className="px-4 py-4 text-xs font-medium text-slate-700 whitespace-nowrap">
-                        {formatTypeLabel(s.twilio_types_key)}
+                        {formatTypeLabel(s.template_types_key)}
                       </td>
                       <td className="px-4 py-4 text-xs">
                       <span className="font-medium text-slate-900">{s.vendor_company_name ?? "—"}</span>
@@ -345,10 +505,13 @@ export default function AdminTemplates() {
                       <AdminBadge status={s.admin_status} />
                     </td>
                     <td className="px-4 py-4">
-                      {s.twilio_content_sid ? (
+                      {s.meta_template_id ? (
                         <div className="flex flex-col gap-2">
                           <code className="break-all rounded-lg bg-slate-100 px-2 py-1 text-[10px] leading-snug text-slate-700 ring-1 ring-slate-200/80">
-                            {s.twilio_content_sid}
+                            {s.meta_template_id}
+                            {s.meta_template_id.startsWith("dry-meta-") && (
+                              <span className="ml-1 text-amber-700">(dry-run)</span>
+                            )}
                           </code>
                           <WaBadge status={s.whatsapp_approval_status} />
                           <button
@@ -390,7 +553,7 @@ export default function AdminTemplates() {
                       {s.admin_status === "pending" || s.admin_status === "none" ? (
                         <div className="flex min-w-[200px] flex-col gap-2">
                           <input
-                            placeholder="Content SID override (optional)"
+                            placeholder="Meta template ID override (optional)"
                             value={extBySubmission[s.id] ?? ""}
                             onChange={(e) =>
                               setExtBySubmission((prev) => ({ ...prev, [s.id]: e.target.value }))

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../../api/client";
-import { IconAlert, IconClock, IconSend, IconTemplate, IconUsers } from "./shared";
+import { IconAlert, IconClock, IconSend, IconUsers } from "./shared";
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState<{ vendors: number; messages_sent: number; messages_failed: number } | null>(
@@ -118,20 +118,6 @@ export default function AdminDashboard() {
                 )}
               </div>
               <p className="text-xs text-slate-600">Subscriptions · reminders</p>
-            </div>
-          </div>
-        </Link>
-        <Link
-          to="/admin/templates"
-          className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm transition hover:border-violet-300 hover:shadow-md sm:col-span-2 lg:col-span-2"
-        >
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50 text-violet-700 ring-1 ring-violet-100">
-              <IconTemplate className="h-5 w-5" />
-            </span>
-            <div>
-              <div className="font-semibold text-slate-900">WhatsApp templates</div>
-              <p className="text-xs text-slate-600">Catalog, approvals, Meta sync</p>
             </div>
           </div>
         </Link>

@@ -4,12 +4,23 @@ import { z } from "zod";
 import { query } from "../db/pool.js";
 import { requireVendor, type AuthedVendorRequest } from "../middleware/auth.js";
 import { parseCsvWithDetectedHeader } from "../services/csvHeader.js";
+import { queueWelcomeMessage } from "../services/customerAutomation.js";
+import { applyCustomerBillingFields } from "../services/customerBilling.js";
+import {
+  autoMapSubscriberHeaders,
+  extractSubscriberRow,
+  getSheetFormatForApi,
+} from "../services/subscriberSheet.js";
 
 const router = Router();
 router.use(requireVendor);
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const mappingSchema = z.record(z.string());
+
+router.get("/sheet-format", (_req: AuthedVendorRequest, res) => {
+  res.json(getSheetFormatForApi());
+});
 
 router.get("/templates", async (req: AuthedVendorRequest, res) => {
   const r = await query(
@@ -57,10 +68,13 @@ router.post("/preview", upload.single("file"), async (req: AuthedVendorRequest, 
     }
     const text = req.file.buffer.toString("utf-8");
     const { headers, rows, headerRowNumberDisplay } = parseCsvWithDetectedHeader(text);
+    const suggested_mapping = autoMapSubscriberHeaders(headers);
     res.json({
       headers,
       header_row_number: headerRowNumberDisplay,
       sample_rows: rows.slice(0, 5),
+      suggested_mapping,
+      sheet_format: getSheetFormatForApi(),
     });
   } catch (e) {
     next(e);
@@ -83,28 +97,15 @@ router.post("/", upload.single("file"), async (req: AuthedVendorRequest, res, ne
 
     const text = req.file.buffer.toString("utf-8");
     const { rows } = parseCsvWithDetectedHeader(text);
+    const vendorId = req.vendorId!;
 
     let imported = 0;
     let skipped = 0;
+    let missingJoinDate = 0;
 
     for (const row of rows) {
-      let name = "";
-      let phone = "";
-      const tags: string[] = [];
-      const customFields: Record<string, string> = {};
-
-      for (const [csvCol, target] of Object.entries(mapping)) {
-        const cell = row[csvCol]?.trim() ?? "";
-        if (target === "phone" && !cell) continue;
-        if (target === "name") name = cell;
-        else if (target === "phone") phone = cell.replace(/\s+/g, "");
-        else if (target === "tags") {
-          tags.push(...cell.split(/[,;]/).map((t) => t.trim()).filter(Boolean));
-        } else if (target.startsWith("custom:")) {
-          const key = target.slice("custom:".length);
-          if (cell !== "") customFields[key] = cell;
-        }
-      }
+      const extracted = extractSubscriberRow(row, mapping);
+      let { name, phone, joining_date, tags } = extracted;
 
       if (!phone) {
         skipped++;
@@ -112,18 +113,40 @@ router.post("/", upload.single("file"), async (req: AuthedVendorRequest, res, ne
       }
       if (!name) name = phone;
 
+      const billing = await applyCustomerBillingFields(vendorId, joining_date, {});
+      if (!billing.joining_date) {
+        missingJoinDate++;
+        skipped++;
+        continue;
+      }
+
       const ins = await query<{ id?: string }>(
-        `INSERT INTO customers (vendor_id, name, phone, tags, custom_fields)
-         VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)
+        `INSERT INTO customers (vendor_id, name, phone, tags, custom_fields, joining_date, recharge_date)
+         VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)
          ON CONFLICT (vendor_id, phone) DO NOTHING
          RETURNING id`,
-        [req.vendorId, name, phone, JSON.stringify(tags), JSON.stringify(customFields)]
+        [
+          vendorId,
+          name,
+          phone,
+          JSON.stringify(tags),
+          JSON.stringify(billing.custom_fields),
+          billing.joining_date,
+          billing.recharge_date,
+        ]
       );
-      if (ins.rows.length > 0) imported++;
-      else skipped++;
+      if (ins.rows.length > 0) {
+        imported++;
+        const newId = ins.rows[0].id;
+        if (newId) {
+          void queueWelcomeMessage(vendorId, newId).catch((err) => {
+            console.error("[import] welcome message failed", err);
+          });
+        }
+      } else skipped++;
     }
 
-    res.json({ imported, skipped, total: rows.length });
+    res.json({ imported, skipped, missing_joining_date: missingJoinDate, total: rows.length });
   } catch (e) {
     next(e);
   }

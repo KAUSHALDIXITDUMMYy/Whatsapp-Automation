@@ -1,4 +1,9 @@
-import { CONTENT_TYPE_OPTIONS, defaultTypesPayload, type TemplateContentValue } from "../constants/templateContent";
+import {
+  CONTENT_TYPE_OPTIONS,
+  defaultTypesPayload,
+  normalizeContentTypeKey,
+  type TemplateContentValue,
+} from "../constants/templateContent";
 
 type Props = {
   value: TemplateContentValue;
@@ -10,18 +15,18 @@ const input =
   "mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500";
 
 function TemplateContentForm({ value, onChange, idPrefix = "tpl" }: Props) {
-  const key = value.twilio_types_key || "twilio/text";
+  const key = normalizeContentTypeKey(value.template_types_key);
   const p = value.types_payload;
 
   function setKey(nextKey: string) {
     onChange({
-      twilio_types_key: nextKey,
+      template_types_key: nextKey,
       types_payload: defaultTypesPayload(nextKey),
     });
   }
 
   function patch(nextPayload: Record<string, unknown>) {
-    onChange({ twilio_types_key: key, types_payload: nextPayload });
+    onChange({ template_types_key: key, types_payload: nextPayload });
   }
 
   return (
@@ -44,7 +49,7 @@ function TemplateContentForm({ value, onChange, idPrefix = "tpl" }: Props) {
         </select>
       </div>
 
-      {key === "twilio/text" && (
+      {key === "text" && (
         <div>
           <label className="block text-xs font-medium text-slate-600">Message body</label>
           <textarea
@@ -58,7 +63,7 @@ function TemplateContentForm({ value, onChange, idPrefix = "tpl" }: Props) {
         </div>
       )}
 
-      {key === "twilio/quick-reply" && (
+      {key === "quick_reply" && (
         <>
           <div>
             <label className="block text-xs font-medium text-slate-600">Message body</label>
@@ -124,7 +129,7 @@ function TemplateContentForm({ value, onChange, idPrefix = "tpl" }: Props) {
         </>
       )}
 
-      {key === "twilio/call-to-action" && (
+      {key === "call_to_action" && (
         <>
           <div>
             <label className="block text-xs font-medium text-slate-600">Message body</label>
@@ -212,7 +217,7 @@ function TemplateContentForm({ value, onChange, idPrefix = "tpl" }: Props) {
         </>
       )}
 
-      {key === "twilio/list-picker" && (
+      {key === "list_picker" && (
         <>
           <div>
             <label className="block text-xs font-medium text-slate-600">Message body</label>
@@ -289,7 +294,7 @@ function TemplateContentForm({ value, onChange, idPrefix = "tpl" }: Props) {
         </>
       )}
 
-      {key === "twilio/catalog" && (
+      {key === "catalog" && (
         <>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>

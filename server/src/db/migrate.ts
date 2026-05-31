@@ -5,21 +5,47 @@ import { pool } from "./pool.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+function loadSql(name: string): string {
+  return readFileSync(join(__dirname, name), "utf-8");
+}
+
+async function tableExists(tableName: string): Promise<boolean> {
+  const r = await pool.query(
+    `SELECT 1 FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_name = $1`,
+    [tableName]
+  );
+  return r.rows.length > 0;
+}
+
 async function migrate() {
-  const sql = readFileSync(join(__dirname, "schema.sql"), "utf-8");
-  await pool.query(sql);
-  const patch = readFileSync(join(__dirname, "subscription_upgrade.sql"), "utf-8");
-  await pool.query(patch);
-  const templatePatch = readFileSync(join(__dirname, "migrate_template_submissions.sql"), "utf-8");
-  await pool.query(templatePatch);
-  const whatsappCols = readFileSync(join(__dirname, "migrate_template_whatsapp_columns.sql"), "utf-8");
-  await pool.query(whatsappCols);
-  const renameAdmin = readFileSync(join(__dirname, "migrate_rename_status_to_admin_status.sql"), "utf-8");
-  await pool.query(renameAdmin);
-  const dashRem = readFileSync(join(__dirname, "migrate_vendor_dashboard_reminders.sql"), "utf-8");
-  await pool.query(dashRem);
-  const contentTypes = readFileSync(join(__dirname, "migrate_template_content_types.sql"), "utf-8");
-  await pool.query(contentTypes);
+  if (!(await tableExists("admins"))) {
+    console.log("Applying schema.sql (fresh database)…");
+    await pool.query(loadSql("schema.sql"));
+  } else {
+    console.log("Database already initialized — skipping schema.sql");
+  }
+
+  const patches = [
+    "subscription_upgrade.sql",
+    "migrate_template_submissions.sql",
+    "migrate_template_whatsapp_columns.sql",
+    "migrate_rename_status_to_admin_status.sql",
+    "migrate_vendor_dashboard_reminders.sql",
+    "migrate_template_content_types.sql",
+    "migrate_remove_twilio.sql",
+    "migrate_message_template_language.sql",
+    "migrate_messages_inbound.sql",
+    "migrate_cable_subscriber.sql",
+    "migrate_platform_simplify.sql",
+    "migrate_subscriber_billing.sql",
+  ];
+
+  for (const file of patches) {
+    console.log(`Applying ${file}…`);
+    await pool.query(loadSql(file));
+  }
+
   console.log("Migration applied successfully.");
   await pool.end();
 }

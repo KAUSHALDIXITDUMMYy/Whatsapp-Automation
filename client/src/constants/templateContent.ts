@@ -1,50 +1,59 @@
-/** Twilio Content types for WhatsApp template submissions (aligned with server twilioContentTypes). */
-
+/** WhatsApp template content types (aligned with server templateContentTypes). */
 export const CONTENT_TYPE_OPTIONS = [
-  { value: "twilio/text", label: "Text", hint: "Plain message body" },
-  { value: "twilio/quick-reply", label: "Quick Reply", hint: "Body + tap buttons" },
-  { value: "twilio/call-to-action", label: "Call to action", hint: "Body + URL or phone buttons" },
-  { value: "twilio/list-picker", label: "List Picker", hint: "Menu of choices" },
-  { value: "twilio/catalog", label: "Catalog", hint: "Product-style items" },
+  { value: "text", label: "Text", hint: "Plain message body" },
+  { value: "quick_reply", label: "Quick Reply", hint: "Body + tap buttons" },
+  { value: "call_to_action", label: "Call to action", hint: "Body + URL or phone buttons" },
+  { value: "list_picker", label: "List Picker", hint: "Saved locally; create in Meta Manager for live use" },
+  { value: "catalog", label: "Catalog", hint: "Saved locally; create in Meta Manager for live use" },
 ] as const;
 
 export type TemplateContentValue = {
-  twilio_types_key: string;
+  template_types_key: string;
   types_payload: Record<string, unknown>;
 };
 
-export function defaultTypesPayload(twilioTypesKey: string): Record<string, unknown> {
-  switch (twilioTypesKey) {
-    case "twilio/text":
+/** Normalize legacy twilio/* keys from older API rows. */
+export function normalizeContentTypeKey(key: string | null | undefined): string {
+  if (!key) return "text";
+  const map: Record<string, string> = {
+    "twilio/text": "text",
+    "twilio/quick-reply": "quick_reply",
+    "twilio/call-to-action": "call_to_action",
+    "twilio/list-picker": "list_picker",
+    "twilio/catalog": "catalog",
+  };
+  return map[key] ?? key;
+}
+
+export function defaultTypesPayload(templateTypesKey: string): Record<string, unknown> {
+  const key = normalizeContentTypeKey(templateTypesKey);
+  switch (key) {
+    case "text":
       return { body: "" };
-    case "twilio/quick-reply":
+    case "quick_reply":
       return {
         body: "",
         actions: [
-          { id: "opt_a", title: "Yes" },
-          { id: "opt_b", title: "No" },
+          { id: "btn_1", title: "Yes" },
+          { id: "btn_2", title: "No" },
         ],
       };
-    case "twilio/call-to-action":
+    case "call_to_action":
       return {
         body: "",
-        actions: [{ type: "URL", title: "Visit site", url: "https://example.com" }],
+        actions: [{ type: "URL", title: "Visit", url: "https://example.com" }],
       };
-    case "twilio/list-picker":
+    case "list_picker":
       return {
-        body: "Choose an option:",
-        button: "See options",
-        items: [
-          { id: "1", item: "First", description: "" },
-          { id: "2", item: "Second", description: "" },
-        ],
+        body: "",
+        button: "Options",
+        items: [{ id: "opt_1", item: "Option 1" }],
       };
-    case "twilio/catalog":
+    case "catalog":
       return {
-        title: "Products",
-        body: "Browse our catalog.",
-        subtitle: "",
-        items: [{ name: "Sample item", description: "", mediaUrl: "" }],
+        title: "",
+        body: "",
+        items: [{ name: "Item 1" }],
       };
     default:
       return { body: "" };

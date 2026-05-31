@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { config } from "../config.js";
+import { handleMetaWhatsAppWebhook } from "../services/metaWebhook.js";
 
 const router = Router();
 
@@ -17,12 +18,14 @@ router.get("/", (req, res) => {
   res.status(403).json({ error: "Webhook verification failed" });
 });
 
-// Meta webhook events (POST)
-router.post("/", (req, res) => {
-  // We currently accept the webhook to avoid retries.
-  // Next step (if you want inbound automation): parse `entry[].changes[]` and map to your customer/message tables.
+// Meta webhook events (POST) — inbound messages + delivery status
+router.post("/", async (req, res) => {
   res.status(200).json({ ok: true });
+  try {
+    await handleMetaWhatsAppWebhook(req.body);
+  } catch (e) {
+    console.error("[meta-webhook] handler error", e);
+  }
 });
 
 export default router;
-

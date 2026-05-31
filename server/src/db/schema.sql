@@ -17,6 +17,11 @@ CREATE TABLE vendors (
   subscription_tier VARCHAR(16) NOT NULL DEFAULT 'basic' CHECK (subscription_tier IN ('basic', 'pro')),
   subscription_expires_at TIMESTAMPTZ,
   whatsapp_sender VARCHAR(64),
+  welcome_on_create_enabled BOOLEAN NOT NULL DEFAULT true,
+  welcome_template_id UUID REFERENCES message_templates(id) ON DELETE SET NULL,
+  appointment_slot_times JSONB NOT NULL DEFAULT '["09:00","10:00","11:00","12:00","14:00","15:00","16:00","17:00"]'::jsonb,
+  appointment_days_ahead INT NOT NULL DEFAULT 7,
+  whatsapp_menu_greeting TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -76,10 +81,10 @@ CREATE TABLE template_submissions (
   vendor_id UUID REFERENCES vendors(id) ON DELETE CASCADE,
   name VARCHAR(255) NOT NULL,
   body TEXT NOT NULL,
-  twilio_types_key VARCHAR(64) NOT NULL DEFAULT 'twilio/text',
+  template_types_key VARCHAR(64) NOT NULL DEFAULT 'text',
   types_payload JSONB NOT NULL DEFAULT '{"body":""}'::jsonb,
   external_template_id VARCHAR(255),
-  twilio_content_sid VARCHAR(64),
+  meta_template_id VARCHAR(128),
   whatsapp_template_name VARCHAR(512),
   whatsapp_category VARCHAR(32),
   whatsapp_approval_status VARCHAR(32),
@@ -103,6 +108,7 @@ CREATE TABLE message_templates (
   name VARCHAR(255) NOT NULL,
   body TEXT NOT NULL,
   external_template_id VARCHAR(255),
+  whatsapp_template_language VARCHAR(32),
   source_submission_id UUID REFERENCES template_submissions(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -137,8 +143,10 @@ CREATE TABLE messages_log (
   phone VARCHAR(32) NOT NULL,
   body TEXT NOT NULL,
   template_id UUID REFERENCES message_templates(id) ON DELETE SET NULL,
-  status VARCHAR(32) NOT NULL CHECK (status IN ('queued', 'sent', 'failed')),
+  direction VARCHAR(16) NOT NULL DEFAULT 'outbound' CHECK (direction IN ('inbound', 'outbound')),
+  status VARCHAR(32) NOT NULL CHECK (status IN ('queued', 'sent', 'failed', 'received', 'delivered', 'read')),
   provider_message_id VARCHAR(255),
+  meta_message_id VARCHAR(128),
   provider_error TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -156,6 +164,30 @@ CREATE TABLE reminder_dispatch_log (
 );
 
 CREATE INDEX idx_reminder_dispatch_rule ON reminder_dispatch_log(rule_id);
+
+CREATE TABLE customer_whatsapp_sessions (
+  customer_id UUID PRIMARY KEY REFERENCES customers(id) ON DELETE CASCADE,
+  vendor_id UUID NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+  state VARCHAR(64) NOT NULL DEFAULT 'idle',
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_customer_whatsapp_sessions_vendor ON customer_whatsapp_sessions(vendor_id);
+
+CREATE TABLE technician_appointments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  vendor_id UUID NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+  customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  appointment_date DATE NOT NULL,
+  appointment_time VARCHAR(16) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'scheduled'
+    CHECK (status IN ('scheduled', 'completed', 'cancelled')),
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_technician_appointments_vendor_date ON technician_appointments(vendor_id, appointment_date DESC);
 
 CREATE TABLE vendor_dashboard_reminders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

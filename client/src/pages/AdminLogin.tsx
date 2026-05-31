@@ -1,6 +1,7 @@
 import { FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { apiFetch, setAdminToken } from "../api/client";
+import { LegalFooter } from "../layout/LegalLayout";
 
 export default function AdminLogin() {
   const navigate = useNavigate();
@@ -91,6 +92,9 @@ export default function AdminLogin() {
               Vendor login →
             </Link>
           </p>
+          <div className="mt-6 border-t border-slate-100 pt-4">
+            <LegalFooter />
+          </div>
         </div>
       </div>
     </div>

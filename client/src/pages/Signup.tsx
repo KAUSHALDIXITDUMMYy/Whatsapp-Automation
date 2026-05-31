@@ -1,6 +1,7 @@
 import { FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { apiFetch, setToken } from "../api/client";
+import { LegalFooter } from "../layout/LegalLayout";
 
 export default function Signup() {
   const navigate = useNavigate();
@@ -65,6 +66,17 @@ export default function Signup() {
             />
           </div>
           {err && <p className="text-sm text-red-600">{err}</p>}
+          <p className="text-xs text-slate-500 leading-relaxed">
+            By creating an account, you agree to our{" "}
+            <Link to="/terms" className="text-brand-700 hover:underline">
+              Terms of Service
+            </Link>{" "}
+            and{" "}
+            <Link to="/privacy" className="text-brand-700 hover:underline">
+              Privacy Policy
+            </Link>
+            .
+          </p>
           <button
             type="submit"
             disabled={loading}
@@ -79,6 +91,9 @@ export default function Signup() {
             Sign in
           </Link>
         </p>
+        <div className="mt-6 pt-4 border-t border-slate-100">
+          <LegalFooter />
+        </div>
       </div>
     </div>
   );

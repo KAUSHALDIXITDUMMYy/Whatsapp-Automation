@@ -80,6 +80,8 @@ export default function ImportCsv() {
         body: JSON.stringify({ name: templateName.trim(), mapping }),
       });
       setTemplateName("");
+      const d = await apiFetch<{ templates: Template[] }>("/api/import/templates");
+      setTemplates(d.templates);
     } catch (ex: unknown) {
       setErr(ex instanceof Error ? ex.message : "Save template failed");
     }
@@ -175,6 +177,25 @@ export default function ImportCsv() {
               >
                 Import subscribers
               </button>
+              {templates.length > 0 && (
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    const t = templates.find((x) => x.id === e.target.value);
+                    if (t) setMapping(t.mapping);
+                  }}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                >
+                  <option value="" disabled>
+                    Load saved mapping…
+                  </option>
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               <input
                 placeholder="Save mapping as…"
                 value={templateName}
